@@ -42,7 +42,7 @@ void main() {
         ..createSync(recursive: true);
       Directory.current = dir;
 
-      expect(() => getProjectDirectory(), returnsNormally);
+      expect(getProjectDirectory(), equals(dir.path));
     });
   });
 }

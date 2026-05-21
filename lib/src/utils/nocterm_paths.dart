@@ -28,6 +28,7 @@ String getNoctermDirectory() {
 }
 
 String getProjectDirectory() {
+  final start = Directory.current.path;
   var parent = Directory.current;
   while (true) {
     final pubspec = File(p.join(parent.path, 'pubspec.yaml'));
@@ -36,9 +37,7 @@ String getProjectDirectory() {
     final newParent = parent.parent;
     // Compare paths, not Directory identity — terminates at Windows drive
     // roots where parent.parent returns the same path.
-    if (newParent.path == parent.path) {
-      return Directory.current.path;
-    }
+    if (newParent.path == parent.path) return start;
     parent = newParent;
   }
 }
