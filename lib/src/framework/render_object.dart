@@ -313,9 +313,12 @@ abstract class RenderObject {
     _size = value;
   }
 
-  // Flags start false so the first mark still apply in markNeedsLayout / markNeedsPaint.
-  // Initial layout/paint is still guaranteed because `layout()` falls through when `_size == null`,
-  // and `paintWithContext` forces a paint when `_cachedBuffer == null`.
+  // Flags start false so the first markNeedsLayout / markNeedsPaint call
+  // still propagates (both short-circuit when already dirty).
+  // Initial layout is still guaranteed because a never-laid-out object has
+  // `_constraints == null`, so layout()'s skip condition cannot match.
+  // Initial paint is guaranteed because painting is an unconditional walk
+  // from the root (`paintWithContext` recurses regardless of `_needsPaint`).
   bool _needsLayout = false;
   bool _needsPaint = false;
   bool _hasLayoutError = false;
@@ -339,10 +342,9 @@ abstract class RenderObject {
   /// Mark this render object as needing layout.
   ///
   /// This will cause [performLayout] to be called during the next layout pass.
-  /// The mark propagates up the tree the first time it's set; subsequent calls short-circuit.
-  //
-  /// Frame-skip in the scheduler can retire `_hasScheduledFrame` between calls,
-  /// so we always need to prod the owner.
+  /// The mark propagates up the tree the first time it's set; subsequent calls
+  /// short-circuit. Frame-skip in the scheduler can retire `_hasScheduledFrame`
+  /// between calls, so even a short-circuited call must prod the owner.
   void markNeedsLayout() {
     if (_needsLayout) {
       owner?.requestVisualUpdate();
@@ -356,9 +358,10 @@ abstract class RenderObject {
   /// Mark this render object as needing to be repainted.
   ///
   /// This will cause [paint] to be called during the next paint pass.
-  /// The paint request will propagate up to the nearest repaint boundary on first mark.
-  /// Subsequent calls while already dirty short-circuit after re-requesting a visual update
-  /// (same frame-skip concern as [markNeedsLayout]).
+  /// The paint request propagates up to the root on first mark, where it
+  /// requests a visual update. Subsequent calls while already dirty
+  /// short-circuit after re-requesting a visual update (same frame-skip
+  /// concern as [markNeedsLayout]).
   void markNeedsPaint() {
     if (_needsPaint) {
       owner?.requestVisualUpdate();
@@ -396,23 +399,22 @@ abstract class RenderObject {
     // `identical()` to compensate for a missing mark elsewhere.
     if (!_needsLayout && constraints == _constraints) return;
 
-    final constraintsChanged = constraints != _constraints;
+    // Getting past the skip above means `_needsLayout || constraints !=
+    // _constraints`, so layout always runs from here on.
     _constraints = constraints;
-    if (_needsLayout || _size == null || constraintsChanged) {
-      // Set _needsLayout = false BEFORE calling performLayout so that
-      // invokeLayoutCallback can be used during layout (its assertion
-      // checks that we're in the middle of performLayout by verifying
-      // _needsLayout is false).
-      _needsLayout = false;
-      try {
-        performLayout();
-        assert(_size != null, 'performLayout() did not set a size');
-      } catch (e, stack) {
-        _reportException('performLayout', e, stack);
-        // Set a default size to prevent cascading failures
-        _size = constraints.constrain(const Size(10, 5));
-        _hasLayoutError = true;
-      }
+    // Set _needsLayout = false BEFORE calling performLayout so that
+    // invokeLayoutCallback can be used during layout (its assertion
+    // checks that we're in the middle of performLayout by verifying
+    // _needsLayout is false).
+    _needsLayout = false;
+    try {
+      performLayout();
+      assert(_size != null, 'performLayout() did not set a size');
+    } catch (e, stack) {
+      _reportException('performLayout', e, stack);
+      // Set a default size to prevent cascading failures
+      _size = constraints.constrain(const Size(10, 5));
+      _hasLayoutError = true;
     }
   }
 
