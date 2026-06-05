@@ -24,18 +24,17 @@ void main() {
     () async {
       await testNocterm('row leaders preserved across rebuild', (tester) async {
         await tester.pumpComponent(_LogViewer());
+        // Settle the transient dirtiness left by the first layout pass
+        // (adoptChild re-marks while children are built), so the appends
+        // below hit a genuinely clean render tree - otherwise a skipped
+        // relayout is masked by the always-dirty first frame.
+        await tester.pump();
 
         final stateFinder = tester.findState<_LogViewerState>();
-        expect(
-          tester.terminalState.containsText('info'),
-          isTrue,
-          reason: 'initial frame must show the level label column',
-        );
-        expect(
-          tester.terminalState.containsText('boot'),
-          isTrue,
-          reason: 'initial frame must show the message column',
-        );
+        expect(tester.terminalState, hasTextAt(0, 0, 'info'),
+            reason: 'initial frame must show the level label column');
+        expect(tester.terminalState, hasTextAt(5, 0, 'boot'),
+            reason: 'initial frame must show the message column');
 
         // Append more entries. This is exactly the serverpod scenario: the
         // ListView's parent rebuilds with a larger itemCount, and existing
@@ -47,22 +46,28 @@ void main() {
         stateFinder.appendEntry('error', 'three');
         await tester.pump();
 
-        // Every message column must still be visible. If the row's layout was
-        // short-circuited, the Expanded(Text(message)) slid to column 0 and
-        // painted over the label, so the label text would disappear even
-        // though the underlying entry still exists.
-        for (final level in const ['info', 'warn', 'error']) {
+        // Every row must keep its two-column layout, at the exact offsets
+        // RenderFlex computes: level at x=0, message after the level text
+        // and the one-cell separator. If the row's relayout was skipped
+        // after its parent data was replaced (offset clobbered to zero),
+        // the Expanded(Text(message)) paints at column 0 over the label -
+        // which containsText alone cannot detect.
+        const rows = [
+          ('info', 'boot'),
+          ('info', 'one'),
+          ('warn', 'two'),
+          ('error', 'three'),
+        ];
+        for (var y = 0; y < rows.length; y++) {
+          final (level, message) = rows[y];
+          expect(tester.terminalState, hasTextAt(0, y, level),
+              reason: 'row $y level column must stay at x=0');
           expect(
-            tester.terminalState.containsText(level),
-            isTrue,
-            reason: 'level column "$level" disappeared after rebuild',
-          );
-        }
-        for (final msg in const ['boot', 'one', 'two', 'three']) {
-          expect(
-            tester.terminalState.containsText(msg),
-            isTrue,
-            reason: 'message "$msg" missing after rebuild',
+            tester.terminalState,
+            hasTextAt(level.length + 1, y, message),
+            reason: 'row $y message must stay right of the level column; '
+                'at column 0 it would mean the row offsets were clobbered '
+                'without a relayout',
           );
         }
       });
