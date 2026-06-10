@@ -1020,7 +1020,17 @@ class TerminalBinding extends NoctermBinding
     // Render pending sixel images
     _renderPendingImages(buffer);
 
-    terminal.flush();
+    // Intentionally do NOT flush here. Flushing inside the differential
+    // render causes the frame to be split into two pipe writes: the cell
+    // diff first (leaving the terminal cursor on whatever cell the diff
+    // happened to write last), then any subsequent write from the caller.
+    // On terminals that follow the cursor for IME composition windows
+    // (e.g. Windows Terminal with Chinese / Japanese / Korean IMEs), this
+    // split causes the IME composition window to flicker between the
+    // last streaming cell and the input field's caret.
+    //
+    // Letting the caller flush once after rendering the frame keeps the
+    // cursor at a single, stable position for the whole frame.
   }
 
   /// Full redraw (used for first frame or after resize).
@@ -1089,7 +1099,9 @@ class TerminalBinding extends NoctermBinding
     // Render pending sixel images
     _renderPendingImages(buffer);
 
-    terminal.flush();
+    // Intentionally do NOT flush here. See _renderFullDiff for the full
+    // rationale; the same split-frame issue applies here on the
+    // first-frame / post-resize path.
   }
 
   // Detailed timing instrumentation for profiling
