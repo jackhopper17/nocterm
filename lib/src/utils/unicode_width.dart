@@ -86,22 +86,19 @@ class UnicodeWidth {
       return 0;
     }
 
-    // General Punctuation (0x2010-0x205F). Most characters here are
-    // East Asian Ambiguous (A) - em dash, smart quotes, ellipsis,
-    // primes, single angle quotes, reversed question/exclamation
-    // marks, etc. - and the bundled wcwidth table returns 1 for
-    // Ambiguous. CJK text renders them as full-width, so we treat
-    // the whole block as wide here.
-    if (rune >= 0x2010 && rune <= 0x205F) {
-      return 2;
-    }
-
     // Delegate to the Unicode 11 East Asian Width property table
-    // (bundled with the xterm_pure dependency). One lookup covers
-    // every CJK ideograph range, kana, hangul, fullwidth/halfwidth
-    // forms, CJK Symbols and Punctuation (《, 》, 「, 」, ...),
-    // Kangxi radicals, compatibility ideographs, etc. - replacing
-    // the hand-maintained range whitelist.
+    // (vendored from xterm_pure at
+    // lib/src/third_party/xterm_pure.dart). One lookup covers every
+    // CJK ideograph range, kana, hangul, fullwidth/halfwidth forms,
+    // CJK Symbols and Punctuation (《, 》, 「, 」, ...), Kangxi
+    // radicals, compatibility ideographs, etc. - replacing the
+    // hand-maintained range whitelist.
+    //
+    // East Asian Ambiguous characters (em dash, smart quotes,
+    // ellipsis, primes in General Punctuation 0x2010-0x205F) resolve
+    // to width 1 here. That matches the default of virtually every
+    // terminal; treating them as full-width misaligns ordinary Latin
+    // text, which is the common case for this framework.
     final width = unicodeV11.wcwidth(rune);
 
     // Some characters are visually 2 cells (emoji presentation) but

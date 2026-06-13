@@ -169,5 +169,31 @@ void main() {
       expect(offset1, equals(offset2));
       expect(offset1, equals(16)); // (45 - 12) / 2 = 16.5 -> 16
     });
+
+    test('East Asian Ambiguous punctuation stays single-width', () {
+      // General Punctuation (0x2010-0x205F) is East Asian Ambiguous.
+      // It must resolve to width 1, matching the default of virtually
+      // every terminal. Treating these as full-width misaligns ordinary
+      // Latin text (lists, centered headings, padded tables, borders).
+      final ambiguous = {
+        '–': 0x2013, // en dash
+        '—': 0x2014, // em dash
+        '‘': 0x2018, // left single quote
+        '’': 0x2019, // right single quote
+        '“': 0x201C, // left double quote
+        '”': 0x201D, // right double quote
+        '•': 0x2022, // bullet
+        '…': 0x2026, // horizontal ellipsis
+        '′': 0x2032, // prime
+      };
+      ambiguous.forEach((char, code) {
+        expect(char.runes.first, equals(code),
+            reason:
+                '$char should be U+${code.toRadixString(16).toUpperCase()}');
+        expect(UnicodeWidth.runeWidth(code), equals(1),
+            reason: '$char (U+${code.toRadixString(16).toUpperCase()}) '
+                'should be single-width');
+      });
+    });
   });
 }
