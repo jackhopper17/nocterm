@@ -1016,7 +1016,17 @@ class TerminalBinding extends NoctermBinding
     // Render pending sixel images
     _renderPendingImages(buffer);
 
-    terminal.flush();
+    // Intentionally do NOT flush here. Flushing inside the differential
+    // render causes the frame to be split into two pipe writes: the cell
+    // diff first (leaving the terminal cursor on whatever cell the diff
+    // happened to write last), then any subsequent write from the caller.
+    // On terminals that follow the cursor for IME composition windows
+    // (e.g. Windows Terminal with Chinese / Japanese / Korean IMEs), this
+    // split causes the IME composition window to flicker between the
+    // last streaming cell and the input field's caret.
+    //
+    // Letting the caller flush once after rendering the frame keeps the
+    // cursor at a single, stable position for the whole frame.
   }
 
   /// Full redraw (used for first frame or after resize).
@@ -1085,7 +1095,9 @@ class TerminalBinding extends NoctermBinding
     // Render pending sixel images
     _renderPendingImages(buffer);
 
-    terminal.flush();
+    // Intentionally do NOT flush here. See _renderFullDiff for the full
+    // rationale; the same split-frame issue applies here on the
+    // first-frame / post-resize path.
   }
 
   // Detailed timing instrumentation for profiling
@@ -1180,6 +1192,91 @@ class TerminalBinding extends NoctermBinding
       terminal.write(' ' * width);
     }
   }
+
+  /// Find the focused [RenderTextField] by walking the element tree.
+  ///
+  /// Looks for a [FocusableElement] whose [Focusable] component has
+  /// `focused == true` and which contains a [RenderTextField] in its
+  /// subtree. Returns `null` if no focused text field is found.
+  RenderTextField? _findFocusedRenderTextField() {
+    if (rootElement == null) return null;
+
+    // Walk the tree looking for a FocusableElement with focused == true
+    // that contains a RenderTextField
+    FocusableElement? focusedElement;
+    void findFocused(Element element) {
+      if (focusedElement != null) return;
+      if (element is FocusableElement && element.component.focused) {
+        focusedElement = element;
+        return;
+      }
+      element.visitChildren(findFocused);
+    }
+
+    findFocused(rootElement!);
+    if (focusedElement == null) return null;
+
+    // Now find the RenderTextField inside the focused element's subtree
+    RenderTextField? result;
+    void findTextField(Element element) {
+      if (result != null) return;
+      if (element is RenderObjectElement &&
+          element.renderObject is RenderTextField) {
+        result = element.renderObject as RenderTextField;
+        return;
+      }
+      element.visitChildren(findTextField);
+    }
+
+    findTextField(focusedElement!);
+    return result;
+  }
+
+  /// Position the physical terminal cursor at the IME composition position
+  /// of the focused text field (if any).
+  ///
+  /// When using an Input Method Editor (IME) such as Chinese Pinyin, the
+  /// terminal emulator displays the composition/preedit window at the
+  /// current cursor position. During differential rendering the cursor
+  /// jumps around the screen to write changed cells, causing the IME
+  /// window to flicker randomly.
+  ///
+  /// By repositioning the terminal cursor to the text field's cursor
+  /// location *after* every frame render, we give the IME a stable
+  /// anchor point. We also show the terminal cursor when a text field
+  /// is focused so that terminal emulators that require a visible cursor
+  /// for IME positioning work correctly.
+  void _positionImeCursor() {
+    final renderTextField = _findFocusedRenderTextField();
+    if (renderTextField == null) {
+      // No focused text field – hide the terminal cursor (normal TUI mode).
+      if (_imeCursorVisible) {
+        terminal.hideCursor();
+        _imeCursorVisible = false;
+      }
+      return;
+    }
+
+    final imePosition = renderTextField.getImeCursorPosition();
+    if (imePosition != null) {
+      // Move the physical terminal cursor to the text field's cursor position.
+      terminal.moveCursor(
+        imePosition.dx.round(),
+        imePosition.dy.round(),
+      );
+
+      // Show the terminal cursor so that IME composition windows
+      // (e.g. Chinese Pinyin) appear at the correct screen position.
+      if (!_imeCursorVisible) {
+        terminal.showCursor();
+        _imeCursorVisible = true;
+      }
+    }
+  }
+
+  /// Tracks whether the terminal cursor is currently visible (shown for IME).
+  /// We keep this in sync to avoid sending redundant show/hide sequences.
+  bool _imeCursorVisible = false;
 
   /// The actual frame drawing logic, registered as a persistent callback.
   void _drawFrameCallback(Duration timeStamp) {
@@ -1291,6 +1388,12 @@ class TerminalBinding extends NoctermBinding
 
     // Render to terminal using differential rendering (buffer diff)
     _renderDifferential(buffer);
+
+    // After rendering, position the terminal cursor at the focused text
+    // field's cursor location. This stabilises the IME composition window
+    // (e.g. Chinese Pinyin) so it doesn't flicker across the screen.
+    _positionImeCursor();
+    terminal.flush();
 
     if (profiling) {
       t5 = DateTime.now().microsecondsSinceEpoch;
