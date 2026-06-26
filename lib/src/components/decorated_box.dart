@@ -269,6 +269,7 @@ class BoxDecoration {
     this.backgroundBlendMode,
     this.shape = BoxShape.rectangle,
     this.title,
+    this.footer,
   });
 
   final Color? color;
@@ -280,21 +281,23 @@ class BoxDecoration {
   final BlendMode? backgroundBlendMode;
   final BoxShape shape;
   final BorderTitle? title;
+  final BorderTitle?
+      footer; // This can just re-use the BorderTitle class as it behaves the same
 
   /// Creates a copy of this decoration with theme colors applied to borders
   /// where default colors are used.
   BoxDecoration withThemeColor(Color themeColor) {
     return BoxDecoration(
-      color: color,
-      image: image,
-      border: border?.withThemeColor(themeColor),
-      borderRadius: borderRadius,
-      boxShadow: boxShadow,
-      gradient: gradient,
-      backgroundBlendMode: backgroundBlendMode,
-      shape: shape,
-      title: title,
-    );
+        color: color,
+        image: image,
+        border: border?.withThemeColor(themeColor),
+        borderRadius: borderRadius,
+        boxShadow: boxShadow,
+        gradient: gradient,
+        backgroundBlendMode: backgroundBlendMode,
+        shape: shape,
+        title: title,
+        footer: footer);
   }
 
   @override
@@ -317,21 +320,22 @@ class BoxDecoration {
         other.gradient == gradient &&
         other.backgroundBlendMode == backgroundBlendMode &&
         other.shape == shape &&
-        other.title == title;
+        other.title == title &&
+        other.footer == footer;
   }
 
   @override
   int get hashCode => Object.hash(
-        color,
-        image,
-        border,
-        borderRadius,
-        boxShadow != null ? Object.hashAll(boxShadow!) : null,
-        gradient,
-        backgroundBlendMode,
-        shape,
-        title,
-      );
+      color,
+      image,
+      border,
+      borderRadius,
+      boxShadow != null ? Object.hashAll(boxShadow!) : null,
+      gradient,
+      backgroundBlendMode,
+      shape,
+      title,
+      footer);
 }
 
 /// Shape of the box
@@ -699,8 +703,117 @@ class RenderDecoratedBox extends RenderObject
         final leftBottomChar =
             !border.left.isNone ? chars.bottomLeft : chars.horizontal;
         _setCell(canvas, left, bottom, leftBottomChar, style);
-        for (int x = left + 1; x < right; x++) {
-          _setCell(canvas, x, bottom, chars.horizontal, style);
+
+        // Check if we have a footer to render
+        final footer = _decoration.footer;
+        final horizontalWidth =
+            right - left - 1; // Available width between corners
+
+        if (footer != null && horizontalWidth >= 5) {
+          // Minimum width: space + 1 char footer + space + some border chars
+          // Format: ─ Footer ─────
+          final footerText = footer.plainText;
+          final footerStyle = footer.style ?? style;
+
+          // Calculate footer display with " Footer " format (space padding)
+          // We need at least 2 horizontal chars for aesthetics
+          final maxFooterWidth =
+              horizontalWidth - 2; // Reserve 2 chars for border lines
+          String displayFooter;
+          if (footerText.length + 2 > maxFooterWidth) {
+            // Truncate with ellipsis
+            final truncateLen =
+                maxFooterWidth - 3; // -3 for "..." and space padding
+            if (truncateLen > 0) {
+              displayFooter = ' ${footerText.substring(0, truncateLen)}… ';
+            } else {
+              // Not enough space even for ellipsis, skip footer
+              displayFooter = '';
+            }
+          } else {
+            displayFooter = ' $footerText ';
+          }
+
+          if (displayFooter.isNotEmpty) {
+            final footerWidth = displayFooter.length;
+            final remainingWidth = horizontalWidth - footerWidth;
+
+            int footerStartX;
+            int leftBorderLen;
+            int rightBorderLen;
+
+            switch (footer.alignment) {
+              case TitleAlignment.left:
+                leftBorderLen = 1; // Single horizontal char before footer
+                footerStartX = left + 1 + leftBorderLen;
+                rightBorderLen = remainingWidth - leftBorderLen;
+                break;
+              case TitleAlignment.center:
+                leftBorderLen = remainingWidth ~/ 2;
+                footerStartX = left + 1 + leftBorderLen;
+                rightBorderLen = remainingWidth - leftBorderLen;
+                break;
+              case TitleAlignment.right:
+                rightBorderLen = 1; // Single horizontal char after footer
+                leftBorderLen = remainingWidth - rightBorderLen;
+                footerStartX = left + 1 + leftBorderLen;
+                break;
+            }
+
+            // Paint left horizontal chars
+            for (int i = 0; i < leftBorderLen; i++) {
+              _setCell(canvas, left + 1 + i, bottom, chars.horizontal, style);
+            }
+
+            // Paint footer
+            if (footer.textSpan != null) {
+              // Rich text - paint with per-character styles
+              final styledSegments =
+                  footer.textSpan!.toStyledSegments(footerStyle);
+              // Paint leading space
+              _setCell(canvas, footerStartX, bottom, ' ', footerStyle);
+              // Paint styled characters
+              final contentLen =
+                  displayFooter.length - 2; // Minus padding spaces
+              int charIndex = 0;
+              for (final segment in styledSegments) {
+                for (int i = 0;
+                    i < segment.text.length && charIndex < contentLen;
+                    i++) {
+                  _setCell(canvas, footerStartX + 1 + charIndex, bottom,
+                      segment.text[i], segment.style ?? footerStyle);
+                  charIndex++;
+                }
+                if (charIndex >= contentLen) break;
+              }
+              // Paint trailing space
+              _setCell(canvas, footerStartX + displayFooter.length - 1, bottom,
+                  ' ', footerStyle);
+            } else {
+              // Plain text - use single style
+              for (int i = 0; i < displayFooter.length; i++) {
+                _setCell(canvas, footerStartX + i, bottom, displayFooter[i],
+                    footerStyle);
+              }
+            }
+
+            // Paint right horizontal chars
+            final rightStartX = footerStartX + footerWidth;
+            for (int i = 0; i < rightBorderLen; i++) {
+              _setCell(
+                  canvas, rightStartX + i, bottom, chars.horizontal, style);
+            }
+          } else {
+            // Footer too short, render normal border
+            for (int x = left + 1; x < right; x++) {
+              _setCell(canvas, x, bottom, chars.horizontal, style);
+            }
+          }
+        } else {
+          // No footer or not enough space, render normal horizontal line
+          for (int x = left + 1; x < right; x++) {
+            _setCell(canvas, x, bottom, chars.horizontal, style);
+          }
         }
         // Use corner only if right border connects, otherwise use horizontal
         final rightBottomChar =
